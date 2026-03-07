@@ -21,4 +21,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "NumberFarm"
 include(":app")
+includeBuild("../PuzzleUtils")
  
