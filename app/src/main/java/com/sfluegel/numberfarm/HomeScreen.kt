@@ -72,7 +72,7 @@ fun HomeScreen(
 
             Row(
                 modifier              = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
             ) {
                 for (size in listOf(3, 5, 7, 9)) {
                     SizeButton(size = size, onClick = { onNewGame(size) })
@@ -85,9 +85,8 @@ fun HomeScreen(
 @Composable
 private fun SizeButton(size: Int, onClick: () -> Unit) {
     OutlinedButton(
-        onClick  = onClick,
-        modifier = Modifier.width(88.dp)
-    ) {
+        onClick  = onClick
+        ) {
         Text(text = "1..${size}", fontSize = 16.sp)
     }
 }

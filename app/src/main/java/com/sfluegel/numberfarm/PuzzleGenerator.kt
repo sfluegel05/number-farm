@@ -13,13 +13,13 @@ object PuzzleGenerator {
      *  3. Run the solver to verify the hints have a unique solution.
      *  4. Retry up to [maxAttempts] times; fall back to a non-unique puzzle if needed.
      */
-    fun generateGame(n: Int, maxAttempts: Int = 10): GameState {
+    fun generateGame(n: Int, maxAttempts: Int = 100): GameState {
         val gridSize = gridSizeFor(n)
         val rng = Random.Default
         repeat(maxAttempts) {
             val solution = generateSolution(n, gridSize, rng)
             val hints    = computeHints(solution, gridSize)
-            if (PuzzleSolver.isUnique(n, gridSize, hints)) {
+            if (PuzzleSolverRowBased.isUnique(n, gridSize, hints)) {
                 println("Generated unique puzzle for n=$n in attempt ${it + 1}")
                 return GameState(n, gridSize, solution, hints)
             }
@@ -91,14 +91,14 @@ object PuzzleGenerator {
 
 // main function for testing
 fun main() {
-    val hints = listOf<Int>()
-    val row: IntArray = intArrayOf(1, 0, 0)
-    val r = PuzzleSolver.hintsFulfilled(hints, row)
-    print("Fulfilled: $r")
-    for (n in 1..3) {
+    for (n in 1..9) {
         val game = PuzzleGenerator.generateGame(n)
-        println("Generated puzzle for n=$n with gridSize=${game.gridSize}")
-        println("Hints: rowHints=${game.hints.rowHints} colHints=${game.hints.colHints}")
-        println("Solution:\n${game.solution.joinToString("\n") { it.joinToString(" ") }}\n")
+        println("Generated game for n=$n with hints: ${game.hints}")
     }
+
+    val res = PuzzleSolverRowBased.isUnique(5, 6, GameHints(
+        rowHints = listOf(listOf(1,2), listOf(10), listOf(5,7), listOf(6), listOf(9), listOf(14,1)),
+        colHints = listOf(listOf(1,5,2), listOf(3,5), listOf(5,1,4), listOf(1,9), listOf(7,5), listOf(2,4,1))
+    ))
+    println(res)
 }

@@ -3,83 +3,94 @@ package com.sfluegel.numberfarm
 /**
  * Solver for Number Farm puzzles.
  *
- * Approach: row-by-row backtracking.
- *  1. Pre-enumerate all valid row arrangements that satisfy the row hints.
- *  2. Apply them one by one, pruning via column constraints at each step.
- *  3. After all rows are placed, verify column hints are fully satisfied.
+ * Rules:
+ *  - Each number 1..n appears at most once per row and at most once per column.
+ *  - Row/column hints list the sums of consecutive blank-separated blocks, in order.
+ *
+ * Approach: backtracking with forward checking.
+ *  1. Pick the cell with the fewest remaining options (MRV).
+ *  2. Try each candidate value; prune via canPlace after each placement.
+ *  3. After all cells are filled, the grid is a valid solution.
  */
 object PuzzleSolver {
 
+    /**
+     * Returns true if every *completed* group in [row] matches [hints] in order.
+     *
+     * A group is "complete" if it contains no CELL_UNSET cells.
+     * Once an incomplete group is encountered, no further groups are validated
+     * (we can't determine their hint index without resolving the unknowns).
+     */
     fun hintsFulfilled(hints: List<Int>, row: IntArray): Boolean {
-        var sum = 0 // get sum of group
-        var groupIdx = 0 // get index of group in hints
+        var hintIdx = 0
+        var sum = 0
+        var groupHasUnset = false
+        var seenIncompleteGroup = false
+
         for (v in row) {
-            if (v == CELL_EMPTY) {
-                // group finished
-                if (sum > 0) {
-                    // if any of hints[groupIdx:] matches the group sum, hints are fulfilled
-                    if (!(groupIdx < hints.size && hints.subList(groupIdx, hints.size)
-                            .contains(sum))
-                    ) {
-                        return false
+            when {
+                v == CELL_UNSET -> groupHasUnset = true
+                v == CELL_EMPTY -> {
+                    if (sum > 0 || groupHasUnset) {
+                        // A group ended here.
+                        when {
+                            groupHasUnset -> seenIncompleteGroup = true
+                            !seenIncompleteGroup -> {
+                                // Complete group before any incomplete group — validate in order.
+                                if (hintIdx >= hints.size || hints[hintIdx] != sum) return false
+                                hintIdx++
+                            }
+                            // else: complete group after an incomplete group — can't validate position.
+                        }
                     }
-                    groupIdx += 1 + hints.subList(groupIdx + 1, hints.size)
-                        .indexOf(sum) // move to the next hint that matches the group sum
+                    sum = 0
+                    groupHasUnset = false
                 }
-                sum = 0
-            } else if (v == CELL_UNSET) {
-                sum = -1
-            } else {
-                if (sum >= 0) sum += v
+                else -> sum += v
             }
         }
-        if (sum > 0) {
-            // if any of hints[groupIdx+1:] matches the group sum, hints are fulfilled
-            if (!(groupIdx < hints.size && hints.subList(groupIdx, hints.size)
-                    .contains(sum))
-            ) {
-                return false
-            }
+
+        // Validate the last group only if it is complete and no incomplete group preceded it.
+        if (sum > 0 && !groupHasUnset && !seenIncompleteGroup) {
+            if (hintIdx >= hints.size || hints[hintIdx] != sum) return false
         }
         return true
     }
 
+    /**
+     * Returns true if the fully-determined [row] (no CELL_UNSET) uses exactly [hints].
+     * Returns true early if any CELL_UNSET is present (row not yet complete).
+     */
     fun hintsUsed(hints: List<Int>, row: IntArray): Boolean {
         var hintIdx = 0
-        var targetSum = 0
-        if (hintIdx < hints.size) {
-            targetSum = hints[hintIdx]
-        }
+        var targetSum = if (hints.isNotEmpty()) hints[0] else 0
         var sum = 0
         for (v in row) {
-            if (v == CELL_UNSET) {
-                return true
-            }
-            else if (v == CELL_EMPTY) {
-                if (sum > 0) {
-                    if (sum != targetSum) {
-                        return false
+            when {
+                v == CELL_UNSET -> return true
+                v == CELL_EMPTY -> {
+                    if (sum > 0) {
+                        if (sum != targetSum) return false
+                        hintIdx++
+                        targetSum = if (hintIdx < hints.size) hints[hintIdx] else 0
                     }
-                    hintIdx++
-                    if (hintIdx < hints.size) {
-                        targetSum = hints[hintIdx]
-                    } else {
-                        targetSum = 0
-                    }
+                    sum = 0
                 }
-                sum = 0
-            }
-            else {
-                sum += v
+                else -> sum += v
             }
         }
         if (sum > 0) {
-            if (sum != targetSum) {
-                return false
-            }
+            if (sum != targetSum) return false
             hintIdx++
         }
         return hintIdx == hints.size
+    }
+
+    fun sumValid(hints: List<Int>, row: IntArray): Boolean {
+        // check if sum of hints is realistic for the row
+        val hintSum = hints.sum()
+        val rowSum = row.filter { it > 0 }.sum()
+        return rowSum <= hintSum
     }
 
     /** True iff [hints] have exactly one solution (stops after finding 2). */
@@ -99,31 +110,32 @@ object PuzzleSolver {
     ): Int {
         val grid = Array(gridSize) { IntArray(gridSize) { CELL_UNSET } }
 
-
-
+        /**
+         * Returns true if placing [value] at [row],[col] is consistent with:
+         *  1. Uniqueness: [value] does not already appear in the same row or column.
+         *  2. Row hint: the affected row is hint-consistent after the placement.
+         *  3. Col hint: the affected column is hint-consistent after the placement.
+         */
         fun canPlace(row: Int, col: Int, value: Int): Boolean {
-            // numbers must be unique in their row and column
             if (value != CELL_EMPTY) {
                 for (r in 0 until gridSize) if (grid[r][col] == value) return false
                 for (c in 0 until gridSize) if (grid[row][c] == value) return false
             }
-            // check if value complies with hints
-            // check if all hints are used (for fully filled rows/columns)
-            for (r in 0 until gridSize) {
-                if (!hintsFulfilled(hints.rowHints[r], grid[r])) return false
-                if (!hintsUsed(hints.rowHints[r], grid[r])) return false
-            }
-            for (c in 0 until gridSize) {
-                val colValues = IntArray(gridSize) { grid[it][c] }
-                if (!hintsFulfilled(hints.colHints[c], colValues)) return false
-                if (!hintsUsed(hints.colHints[c], colValues)) return false
-            }
-
-            return true
+            // Temporarily place the value to check hint consistency.
+            val old = grid[row][col]
+            grid[row][col] = value
+            val rowOk = hintsFulfilled(hints.rowHints[row], grid[row]) &&
+                        hintsUsed(hints.rowHints[row], grid[row]) && sumValid(hints.rowHints[row], grid[row])
+            val colValues = IntArray(gridSize) { grid[it][col] }
+            val colOk = hintsFulfilled(hints.colHints[col], colValues) &&
+                        hintsUsed(hints.colHints[col], colValues) && sumValid(hints.colHints[col], colValues)
+            grid[row][col] = old
+            return rowOk && colOk
         }
 
         var remainingValues = Array(gridSize * gridSize) { (0..n).toMutableSet() }
-        // remove values that cannot be placed in a cell due to hints
+
+        // Initial pruning pass.
         for (r in 0 until gridSize) {
             for (c in 0 until gridSize) {
                 val cellValues = remainingValues[r * gridSize + c]
@@ -134,9 +146,9 @@ object PuzzleSolver {
         }
 
         fun nextCell(): Pair<Int, Int> {
-            // Select the next cell to fill using MRV heuristic: the one with the fewest remaining options.
+            // MRV heuristic: pick the unset cell with the fewest remaining options.
             var minOptions = Int.MAX_VALUE
-            var next: Pair<Int, Int> = Pair(0, 0)
+            var next = Pair(0, 0)
             for (r in 0 until gridSize) {
                 for (c in 0 until gridSize) {
                     if (grid[r][c] == CELL_UNSET) {
@@ -152,33 +164,36 @@ object PuzzleSolver {
         }
 
         fun forwardCheck(row: Int, col: Int) {
-            // After placing a value, remove it from the remaining options of cells in the same row and column.
+            // Re-prune candidates in the same row and column after placing a value.
             for (c in 0 until gridSize) {
-                for (v in remainingValues[row * gridSize + c].toList()) {
-                    if (!canPlace(row, c, v)) remainingValues[row * gridSize + c].remove(v)
+                if (grid[row][c] == CELL_UNSET) {
+                    for (v in remainingValues[row * gridSize + c].toList()) {
+                        if (!canPlace(row, c, v)) remainingValues[row * gridSize + c].remove(v)
+                    }
                 }
             }
             for (r in 0 until gridSize) {
-                for (v in remainingValues[r * gridSize + col].toList()) {
-                    if (!canPlace(r, col, v)) remainingValues[r * gridSize + col].remove(v)
+                if (grid[r][col] == CELL_UNSET) {
+                    for (v in remainingValues[r * gridSize + col].toList()) {
+                        if (!canPlace(r, col, v)) remainingValues[r * gridSize + col].remove(v)
+                    }
                 }
             }
         }
 
         var count = 0
+
+        // Returns true  → keep searching (haven't hit maxCount yet).
+        // Returns false → stop searching (hit maxCount, or caller should stop).
         fun backtrack(pos: Pair<Int, Int>, nFilled: Int): Boolean {
-            val row = pos.first
-            val column = pos.second
             if (nFilled == gridSize * gridSize) {
-                println("Found solution ${count + 1}")
-                println(grid.joinToString("\n") { it.joinToString(" ") })
                 count++
                 return count < maxCount
             }
+            val (row, column) = pos
             for (value in remainingValues[row * gridSize + column].toList()) {
                 grid[row][column] = value
-                val remainingValuesCopy = remainingValues.map { it.toMutableSet() }
-                    .toTypedArray() // deep copy for backtracking
+                val remainingValuesCopy = remainingValues.map { it.toMutableSet() }.toTypedArray()
                 forwardCheck(row, column)
                 val next = nextCell()
                 if (!backtrack(next, nFilled + 1)) {
@@ -192,8 +207,7 @@ object PuzzleSolver {
             return true
         }
 
-        val first = nextCell()
-        backtrack(first, 0)
+        backtrack(nextCell(), 0)
         return count
     }
 }

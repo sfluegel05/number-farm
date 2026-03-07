@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -27,13 +28,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.Box
+import com.sfluegel.numberfarm.ui.theme.Green40
+import com.sfluegel.numberfarm.ui.theme.GreenGrey40
 import com.sfluegel.puzzleutils.PencilMarksGrid
 import com.sfluegel.puzzleutils.PuzzleGridCell
-import com.sfluegel.puzzleutils.PuzzleHintCell
 import com.sfluegel.puzzleutils.PuzzleLayout
 import com.sfluegel.puzzleutils.PuzzleTopAppBar
 import com.sfluegel.puzzleutils.WavyLoadingIndicator
@@ -41,7 +45,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-private const val EMPTY_CELL_SYMBOL = "·"
+private const val EMPTY_CELL_SYMBOL = "/"
+
+/** Background tint applied when the player marks a cell as "definitely not empty". */
+private val NotEmptyMarkColor = GreenGrey40
 
 // ── Screen entry point ─────────────────────────────────────────────────────────
 
@@ -82,12 +89,13 @@ fun GameScreen(n: Int, onBack: () -> Unit) {
                 helpText          =
                     "Fill the $gridSize×$gridSize grid with numbers 1–$n.\n\n" +
                     "Each number may appear at most once per row and column. " +
-                    "Not every cell needs a number — use · to mark a cell as intentionally empty.\n\n" +
+                    "Not every cell needs a number — use $EMPTY_CELL_SYMBOL to mark a cell as intentionally empty.\n\n" +
                     "The hints show the sums of consecutive filled cells in each row and column. " +
                     "For example, \"5,2\" on the left means a group of adjacent cells summing to 5, " +
                     "then a gap, then another group summing to 2.\n\n" +
                     "Tap a cell to select it, then pick a value below. " +
-                    "Switch to pencil mode to note down candidates."
+                    "Switch to pencil mode to note down candidates. " +
+                    "Use \"Not empty\" to shade a cell green as a reminder that it must contain a number."
             )
         }
     ) { innerPadding ->
@@ -139,17 +147,23 @@ private fun PuzzleBoard(
     val candidateLabels = remember(n) { listOf(EMPTY_CELL_SYMBOL) + (1..n).map { it.toString() } }
     val markCols       = remember(n) { if (n + 1 <= 4) 2 else 3 }
 
-    val cells       = remember(gameState) { mutableStateListOf(*Array(gridSize * gridSize) { CELL_UNSET }) }
-    val pencilMarks = remember(gameState) { mutableStateListOf(*Array<Set<Int>>(gridSize * gridSize) { emptySet() }) }
-    var selectedCell by remember { mutableStateOf<Int?>(null) }
-    var pencilMode   by remember { mutableStateOf(false) }
-    val history      = remember(gameState) { ArrayDeque<Pair<List<Int>, List<Set<Int>>>>() }
+    val cells         = remember(gameState) { mutableStateListOf(*Array(gridSize * gridSize) { CELL_UNSET }) }
+    val pencilMarks   = remember(gameState) { mutableStateListOf(*Array<Set<Int>>(gridSize * gridSize) { emptySet() }) }
+    val notEmptyMarks = remember(gameState) { mutableStateListOf(*Array(gridSize * gridSize) { false }) }
+    var selectedCell  by remember { mutableStateOf<Int?>(null) }
+    var pencilMode    by remember { mutableStateOf(false) }
+    val history       = remember(gameState) {
+        ArrayDeque<Triple<List<Int>, List<Set<Int>>, List<Boolean>>>()
+    }
 
-    fun saveSnapshot() { history.addLast(cells.toList() to pencilMarks.toList()) }
+    fun saveSnapshot() {
+        history.addLast(Triple(cells.toList(), pencilMarks.toList(), notEmptyMarks.toList()))
+    }
     fun undo() {
-        val (snapCells, snapMarks) = history.removeLastOrNull() ?: return
-        snapCells.forEachIndexed { i, v -> cells[i] = v }
-        snapMarks.forEachIndexed { i, v -> pencilMarks[i] = v }
+        val (snapCells, snapMarks, snapNotEmpty) = history.removeLastOrNull() ?: return
+        snapCells.forEachIndexed    { i, v -> cells[i]         = v }
+        snapMarks.forEachIndexed    { i, v -> pencilMarks[i]   = v }
+        snapNotEmpty.forEachIndexed { i, v -> notEmptyMarks[i] = v }
         selectedCell = null
     }
 
@@ -174,19 +188,30 @@ private fun PuzzleBoard(
     val isSolved by remember {
         derivedStateOf {
             cells.indices.all { idx ->
-                cells[idx] == gameState.solution[idx / gridSize][idx % gridSize]
+                val sol = gameState.solution[idx / gridSize][idx % gridSize]
+                val cell = cells[idx]
+                if (sol == CELL_EMPTY) cell == CELL_EMPTY || cell == CELL_UNSET
+                else cell == sol
             }
         }
     }
 
     var showSolvedDialog by remember { mutableStateOf(false) }
-    LaunchedEffect(isSolved) { if (isSolved) { onSolved(); showSolvedDialog = true } }
+    LaunchedEffect(isSolved) {
+        if (isSolved) {
+            // Fill any cells the player left unset (solution has CELL_EMPTY there).
+            cells.indices.forEach { idx -> if (cells[idx] == CELL_UNSET) cells[idx] = CELL_EMPTY }
+            onSolved()
+            showSolvedDialog = true
+        }
+    }
 
     // Register reset function so the top-bar's ↺ button can clear everything.
     SideEffect {
         onRegisterReset {
-            cells.indices.forEach       { i -> cells[i]       = CELL_UNSET }
-            pencilMarks.indices.forEach { i -> pencilMarks[i] = emptySet() }
+            cells.indices.forEach         { i -> cells[i]         = CELL_UNSET }
+            pencilMarks.indices.forEach   { i -> pencilMarks[i]   = emptySet() }
+            notEmptyMarks.indices.forEach { i -> notEmptyMarks[i] = false }
             history.clear()
             selectedCell = null
         }
@@ -216,35 +241,51 @@ private fun PuzzleBoard(
             )
 
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                // ── Column hints row ──────────────────────────────────────────
+                val hintFontSize = (cellSize.value * 0.35f).sp
+
+                // ── Column hints row — each hint on its own line ──────────────
                 Row {
                     Spacer(Modifier.size(cellSize))   // top-left corner
                     for (c in 0 until gridSize) {
                         val ch = gameState.hints.colHints[c]
-                        PuzzleHintCell(
-                            primaryHint   = ch.firstOrNull()?.toString(),
-                            secondaryHint = ch.drop(1).joinToString(",").ifEmpty { null },
-                            cellSize      = cellSize
-                        )
+                        Box(Modifier.size(cellSize), contentAlignment = Alignment.BottomCenter) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                ch.forEach { hint ->
+                                    Text(
+                                        text       = hint.toString(),
+                                        fontSize   = hintFontSize,
+                                        fontWeight = FontWeight.Bold,
+                                        color      = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
-                // ── Grid rows with row hints ──────────────────────────────────
+                // ── Grid rows with row hints — comma-separated ────────────────
                 for (r in 0 until gridSize) {
                     Row {
                         val rh = gameState.hints.rowHints[r]
-                        PuzzleHintCell(
-                            primaryHint   = rh.firstOrNull()?.toString(),
-                            secondaryHint = rh.drop(1).joinToString(",").ifEmpty { null },
-                            cellSize      = cellSize
-                        )
+                        Box(Modifier.size(cellSize), contentAlignment = Alignment.CenterEnd) {
+                            if (rh.isNotEmpty()) {
+                                Text(
+                                    text       = rh.joinToString(","),
+                                    fontSize   = hintFontSize,
+                                    fontWeight = FontWeight.Bold,
+                                    color      = MaterialTheme.colorScheme.primary,
+                                    textAlign  = TextAlign.Center
+                                )
+                            }
+                        }
                         for (c in 0 until gridSize) {
                             val idx   = r * gridSize + c
                             val value = cells[idx]
                             val marks = pencilMarks[idx]
-                            val bgColor = when (value) {
-                                CELL_UNSET -> MaterialTheme.colorScheme.surface
-                                CELL_EMPTY -> MaterialTheme.colorScheme.surfaceVariant
-                                else       -> MaterialTheme.colorScheme.primaryContainer
+                            val bgColor = when {
+                                value == CELL_EMPTY  -> MaterialTheme.colorScheme.surfaceVariant
+                                value != CELL_UNSET  -> MaterialTheme.colorScheme.primaryContainer
+                                notEmptyMarks[idx]   -> NotEmptyMarkColor
+                                else                 -> MaterialTheme.colorScheme.surface
                             }
                             PuzzleGridCell(
                                 cellSize        = cellSize,
@@ -260,7 +301,7 @@ private fun PuzzleBoard(
                                             cols     = markCols,
                                             cellSize = cellSize
                                         )
-                                    value == CELL_UNSET -> { /* blank */ }
+                                    value == CELL_UNSET -> { /* blank or just the green shading */ }
                                     value == CELL_EMPTY -> Text(
                                         text     = EMPTY_CELL_SYMBOL,
                                         fontSize = (cellSize.value * 0.50f).sp,
@@ -311,7 +352,7 @@ private fun PuzzleBoard(
                         }
                     }
                 }
-                // ── Undo · Clear · Pencil toggle ──────────────────────────────
+                // ── Undo · Clear · Pencil toggle · Not-empty mark (pencil only) ───
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment     = Alignment.CenterVertically
@@ -322,16 +363,38 @@ private fun PuzzleBoard(
                     ) { Text("Undo") }
 
                     val sel          = selectedCell
-                    val clearEnabled = sel != null && (cells[sel] != CELL_UNSET || pencilMarks[sel].isNotEmpty())
+                    val clearEnabled = sel != null &&
+                        (cells[sel] != CELL_UNSET || pencilMarks[sel].isNotEmpty() || notEmptyMarks[sel])
                     TextButton(
                         onClick = {
                             val idx = sel ?: return@TextButton
                             saveSnapshot()
-                            if (cells[idx] != CELL_UNSET) cells[idx] = CELL_UNSET
-                            else pencilMarks[idx] = emptySet()
+                            when {
+                                cells[idx] != CELL_UNSET       -> cells[idx] = CELL_UNSET
+                                pencilMarks[idx].isNotEmpty()  -> pencilMarks[idx] = emptySet()
+                                else                           -> notEmptyMarks[idx] = false
+                            }
                         },
                         enabled = clearEnabled
                     ) { Text("Clear") }
+
+                    FilterChip(
+                        selected = sel != null && notEmptyMarks[sel],
+                        onClick  = {
+                            val idx = selectedCell ?: return@FilterChip
+                            saveSnapshot()
+                            notEmptyMarks[idx] = !notEmptyMarks[idx]
+                        },
+                        label   = { Text("Not empty") },
+                        enabled = selectedCell != null,
+                        colors = if (sel != null && notEmptyMarks[sel]) FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = NotEmptyMarkColor,
+                            selectedLabelColor     = MaterialTheme.colorScheme.onSurfaceVariant
+                        ) else FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Green40.copy(alpha = 0.5f),
+                            selectedLabelColor     = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    )
 
                     FilterChip(
                         selected = pencilMode,
