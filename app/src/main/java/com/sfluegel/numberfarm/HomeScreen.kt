@@ -22,6 +22,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -37,6 +38,7 @@ fun HomeScreen(
     onStats: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val uriHandler = LocalUriHandler.current
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val minHeight = maxHeight
         Column(
@@ -108,6 +110,21 @@ fun HomeScreen(
             TextButton(onClick = onStats) {
                 Text("View Statistics")
             }
+
+            TextButton(onClick = {
+                uriHandler.openUri("https://github.com/sfluegel05/number-farm/issues")
+            }) {
+                Text("Complaints? Suggestions?")
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text      = "v${BuildConfig.VERSION_NAME}",
+                fontSize  = 12.sp,
+                color     = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center
+            )
         }
     }
 }
