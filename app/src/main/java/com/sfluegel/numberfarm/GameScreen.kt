@@ -61,7 +61,7 @@ private class GameProgress(
 )
 
 /** Background tint applied when the player marks a cell as "definitely not empty". */
-private val NotEmptyMarkColor = GreenGrey40
+private val NotEmptyMarkColor = GreenGrey40.copy(alpha = 0.45f)
 
 // ── Screen entry point ─────────────────────────────────────────────────────────
 
