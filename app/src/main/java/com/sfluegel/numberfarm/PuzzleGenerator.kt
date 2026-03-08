@@ -91,9 +91,9 @@ object PuzzleGenerator {
 
 // main function for testing
 fun main() {
-    for (n in 1..9) {
-        val game = PuzzleGenerator.generateGame(n)
-        println("Generated game for n=$n with hints: ${game.hints}")
+    for (i in 1 ..5) {
+        val game = PuzzleGenerator.generateGame(9)
+        println("Generated game for n=9 with hints: ${game.hints}")
     }
 
     val res = PuzzleSolverRowBased.isUnique(5, 6, GameHints(

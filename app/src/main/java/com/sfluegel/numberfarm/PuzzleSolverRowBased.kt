@@ -116,8 +116,11 @@ object PuzzleSolverRowBased {
     /**
      * Enumerates all valid row arrangements of length [gridSize] using numbers from 1..[n].
      * Each arrangement satisfies [rowHints] and has no repeated numbers.
+     *
+     * @param allowed Optional per-position value filters. When provided, only values present in
+     *                [allowed][pos] are tried at each position. Pass null to allow all values.
      */
-    fun getValidRows(n: Int, gridSize: Int, hints: List<Int>): List<IntArray> {
+    fun getValidRows(n: Int, gridSize: Int, hints: List<Int>, allowed: Array<Set<Int>>? = null): List<IntArray> {
         val results = mutableListOf<IntArray>()
         val current = IntArray(gridSize) { CELL_UNSET }
 
@@ -129,7 +132,8 @@ object PuzzleSolverRowBased {
                 if (isPartialOk(current)) results.add(current.copyOf())
                 return
             }
-            for (num in listOf(CELL_EMPTY) + availableNumbers) {
+            val candidates = listOf(CELL_EMPTY) + availableNumbers
+            for (num in if (allowed != null) candidates.filter { it in allowed[pos] } else candidates) {
                 current[pos] = num
                 if (isPartialOk(current)) {
                     backtrack(pos + 1, if (num == CELL_EMPTY) availableNumbers else availableNumbers - num)
@@ -144,7 +148,7 @@ object PuzzleSolverRowBased {
 
     /** True iff [hints] have exactly one solution (stops after finding 2). */
     fun isUnique(n: Int, gridSize: Int, hints: GameHints): Boolean {
-        val sols = countSolutions(n, gridSize, hints, maxCount = 2)
+        val sols = countSolutions(n, gridSize, hints, maxCount = 2, useAC3 = false)
         if (sols == 0) println("No solutions found for hints: $hints")
         else if (sols > 1) println("Multiple solutions found for hints: $hints")
         return sols == 1
@@ -155,10 +159,139 @@ object PuzzleSolverRowBased {
         n: Int,
         gridSize: Int,
         hints: GameHints,
-        maxCount: Int = Int.MAX_VALUE
+        maxCount: Int = Int.MAX_VALUE,
+        useAC3: Boolean = true
     ): Int {
-        // Pre-enumerate valid row configurations for each row.
-        val rowConfigs = List(gridSize) { r -> getValidRows(n, gridSize, hints.rowHints[r]) }
+        // possible[r][c] = values that can appear at cell (r,c) given configs generated so far.
+        // Starts as the full domain {CELL_EMPTY, 1..n}; narrowed after each row/column is generated.
+        val possible = Array(gridSize) { Array(gridSize) { (0..n).toMutableSet() } }
+
+        val rowConfigs = MutableList<List<IntArray>>(gridSize) { emptyList() }
+        val colConfigs = MutableList<List<IntArray>>(gridSize) { emptyList() }
+
+        // Start with row 0, then col 0, then row 1, then col 1, etc., always picking the next item with the smallest minimum hint.
+        val items = ((0 until gridSize).map { true to it } + (0 until gridSize).map { false to it })
+            .sortedBy { (isRow, idx) -> if (isRow) hints.rowHints[idx].sum() else hints.colHints[idx].sum() }
+
+        for ((isRow, idx) in items) {
+            if (isRow) {
+                val allowed = Array(gridSize) { c -> possible[idx][c].toSet() }
+                rowConfigs[idx] = getValidRows(n, gridSize, hints.rowHints[idx], allowed)
+                // Narrow possible[idx][c] to only values that actually appear in any config.
+                for (c in 0 until gridSize) {
+                    possible[idx][c].retainAll(rowConfigs[idx].mapTo(mutableSetOf()) { it[c] })
+                }
+            } else {
+                val allowed = Array(gridSize) { r -> possible[r][idx].toSet() }
+                colConfigs[idx] = getValidRows(n, gridSize, hints.colHints[idx], allowed)
+                // Narrow possible[r][idx] to only values that actually appear in any config.
+                for (r in 0 until gridSize) {
+                    possible[r][idx].retainAll(colConfigs[idx].mapTo(mutableSetOf()) { it[r] })
+                }
+            }
+        }
+        println("Row/col configs after interleaved generation: rows=${rowConfigs.sumOf { it.size }} cols=${colConfigs.sumOf { it.size }}")
+
+        fun arcReduce(left: Int, right: Int): Boolean {
+            var changed = false
+            var remainingConfigLeft = rowConfigs[left].toMutableList()
+            for (configLeft in rowConfigs[left]) {
+                var matchesAny = false
+                for (configRight in rowConfigs[right]) {
+                    var matchesAllColumns = true
+                    for (c in 0 until gridSize) {
+                        var matchesThisColumn = false
+                        for (colConfig in colConfigs[c]) {
+                            if (configLeft[c] == colConfig[left] && configRight[c] == colConfig[right]) {
+                                matchesThisColumn = true
+                                break
+                            }
+                        }
+                        if (!matchesThisColumn) {
+                            matchesAllColumns = false
+                            break
+                        }
+                    }
+                    if (matchesAllColumns) {
+                        matchesAny = true
+                        break
+                    }
+                }
+                if (!matchesAny) {
+                    remainingConfigLeft.remove(configLeft)
+                    changed = true
+                }
+            }
+            rowConfigs[left] = remainingConfigLeft
+            return changed
+        }
+        /**
+         * For each cell (r, c), the value it holds must be reachable from both its row
+         * configuration (rowConfigs[r][*][c]) and its column configuration (colConfigs[c][*][r]).
+         * The intersection of those two value-sets is the only set a cell can ever take.
+         * Prune any row/column config that assigns a value outside that intersection.
+         * Repeat until no more configs are removed (fixed point).
+         */
+        fun cellPrune() {
+            var changed = true
+            while (changed) {
+                changed = false
+                // possible[r][c] = values that appear in at least one rowConfig for row r at
+                // position c, AND in at least one colConfig for column c at position r.
+                val possible = Array(gridSize) { r ->
+                    Array(gridSize) { c ->
+                        val fromRow = rowConfigs[r].mapTo(mutableSetOf()) { it[c] }
+                        val fromCol = colConfigs[c].mapTo(mutableSetOf()) { it[r] }
+                        fromRow.retainAll(fromCol)
+                        fromRow  // now the intersection
+                    }
+                }
+                for (r in 0 until gridSize) {
+                    val pruned = rowConfigs[r].filter { config ->
+                        (0 until gridSize).all { c -> config[c] in possible[r][c] }
+                    }
+                    if (pruned.size < rowConfigs[r].size) { rowConfigs[r] = pruned; changed = true }
+                }
+                for (c in 0 until gridSize) {
+                    val pruned = colConfigs[c].filter { config ->
+                        (0 until gridSize).all { r -> config[r] in possible[r][c] }
+                    }
+                    if (pruned.size < colConfigs[c].size) { colConfigs[c] = pruned; changed = true }
+                }
+            }
+        }
+        cellPrune()
+
+
+
+        fun ac3Prune() {
+            // start with all row-row pairs
+            var agenda = ArrayDeque<Pair<Int, Int>>()
+            for (row in 0 until gridSize) {
+                for (row2 in 0 until gridSize) {
+                    if (row != row2) {
+                        agenda.add(row to row2)
+                        agenda.add(row2 to row)
+                    }
+                }
+            }
+            while (agenda.isNotEmpty()) {
+                val (left, right) = agenda.removeFirst()
+                if (arcReduce(left, right)) {
+                    // if left was reduced, add all pairs (other, left) back to the agenda
+                    for (other in 0 until gridSize) {
+                        if (other != left && other != right) {
+                            agenda.add(other to left)
+                        }
+                    }
+                }
+            }
+
+        }
+        if (useAC3) {
+            ac3Prune()
+            println("Number of row configs after AC-3: ${rowConfigs.sumOf { it.size }}")
+        }
 
         val grid = Array(gridSize) { IntArray(gridSize) { CELL_EMPTY } }
         // colUsed[c][v] = true if value v has been placed in column c already.

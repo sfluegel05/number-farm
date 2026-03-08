@@ -13,9 +13,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,7 +31,10 @@ import com.sfluegel.numberfarm.ui.theme.NumberFarmTheme
 
 @Composable
 fun HomeScreen(
+    resumableGame: SavedGame?,
+    onResume: () -> Unit,
     onNewGame: (Int) -> Unit,
+    onStats: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
@@ -61,6 +67,24 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(48.dp))
 
+            // ── Resume button (only shown when there's an in-progress game) ──────
+            if (resumableGame != null) {
+                val mins = resumableGame.elapsedSeconds / 60
+                val secs = resumableGame.elapsedSeconds % 60
+                Button(
+                    onClick  = onResume,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text     = "Resume 1..${resumableGame.n}  ·  (%d:%02d)".format(mins, secs),
+                        fontSize = 16.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+
             Text(
                 text       = "Choose a field size:",
                 fontSize   = 18.sp,
@@ -77,6 +101,12 @@ fun HomeScreen(
                 for (size in listOf(3, 5, 7, 9)) {
                     SizeButton(size = size, onClick = { onNewGame(size) })
                 }
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            TextButton(onClick = onStats) {
+                Text("View Statistics")
             }
         }
     }
@@ -95,6 +125,6 @@ private fun SizeButton(size: Int, onClick: () -> Unit) {
 @Composable
 fun HomeScreenPreview() {
     NumberFarmTheme {
-        HomeScreen(onNewGame = {})
+        HomeScreen(resumableGame = null, onResume = {}, onNewGame = {}, onStats = {})
     }
 }

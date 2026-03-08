@@ -1,5 +1,8 @@
 package com.sfluegel.numberfarm
 
+import com.sfluegel.puzzleutils.PersistentHistory
+import com.sfluegel.puzzleutils.SaveStore
+
 /** A cell deliberately left blank (valid puzzle move). */
 const val CELL_EMPTY = 0
 
@@ -37,3 +40,37 @@ class GameState(
     val solution: Array<IntArray>,
     val hints: GameHints
 )
+
+/** Snapshot of an in-progress game that can be restored later. */
+data class SavedGame(
+    val n: Int,
+    val gameState: GameState,
+    val cells: List<Int>,
+    val pencilMarks: List<Set<Int>>,
+    val notEmptyMarks: List<Boolean>,
+    val elapsedSeconds: Long,
+    val history: List<Triple<List<Int>, List<Set<Int>>, List<Boolean>>>
+)
+
+/** In-memory save slots, one per n value. Tracks the most-recently saved slot. */
+object GameSave : SaveStore<Int, SavedGame>({ it.n })
+
+/** One completed solve record. */
+data class SolveRecord(
+    val timestamp: Long,
+    val n: Int,
+    val elapsedSeconds: Long
+)
+
+/** Persistent solve history, backed by SharedPreferences. */
+object SolveHistory : PersistentHistory<SolveRecord>("solve_history") {
+    override fun serialize(record: SolveRecord) =
+        "${record.timestamp},${record.n},${record.elapsedSeconds}"
+
+    override fun deserialize(s: String): SolveRecord? = try {
+        val p = s.split(",")
+        SolveRecord(p[0].toLong(), p[1].toInt(), p[2].toLong())
+    } catch (_: Exception) { null }
+
+    override fun timestampOf(record: SolveRecord) = record.timestamp
+}
