@@ -28,7 +28,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             NumberFarmTheme {
                 // 0 = Home; -1 = Statistics; 3/5/7/9 = game size
-                var encodedScreen by rememberSaveable { mutableStateOf(0) }
+                var encodedScreen      by rememberSaveable { mutableStateOf(0) }
+                var diagonalMode       by rememberSaveable { mutableStateOf(false) }
+                var multiplicationMode by rememberSaveable { mutableStateOf(false) }
                 val screen: Screen = when {
                     encodedScreen == 0  -> Screen.Home
                     encodedScreen == -1 -> Screen.Statistics
@@ -38,19 +40,25 @@ class MainActivity : ComponentActivity() {
                     is Screen.Statistics -> StatisticsScreen(onBack = { encodedScreen = 0 })
                     is Screen.Home -> Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                         HomeScreen(
-                            modifier      = Modifier.padding(innerPadding),
-                            resumableGame = GameSave.getLastSaved(),
-                            onResume      = { encodedScreen = GameSave.getLastSaved()!!.n },
-                            onNewGame     = { size ->
+                            modifier                  = Modifier.padding(innerPadding),
+                            resumableGame             = GameSave.getLastSaved(),
+                            onResume                  = { encodedScreen = GameSave.getLastSaved()!!.n },
+                            onNewGame                 = { size ->
                                 GameSave.clear(size)
                                 encodedScreen = size
                             },
-                            onStats       = { encodedScreen = -1 }
+                            onStats                   = { encodedScreen = -1 },
+                            diagonalMode              = diagonalMode,
+                            onDiagonalModeChange      = { diagonalMode = it },
+                            multiplicationMode        = multiplicationMode,
+                            onMultiplicationModeChange = { multiplicationMode = it }
                         )
                     }
                     is Screen.Game -> GameScreen(
-                        n      = s.size,
-                        onBack = { encodedScreen = 0 }
+                        n                  = s.size,
+                        diagonalMode       = diagonalMode,
+                        multiplicationMode = multiplicationMode,
+                        onBack             = { encodedScreen = 0 }
                     )
                 }
             }

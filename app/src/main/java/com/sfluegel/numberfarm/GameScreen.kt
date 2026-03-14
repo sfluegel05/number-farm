@@ -43,6 +43,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.graphics.compositeOver
+import com.sfluegel.numberfarm.ui.theme.Amber80
 import com.sfluegel.numberfarm.ui.theme.Green40
 import com.sfluegel.numberfarm.ui.theme.GreenGrey40
 import com.sfluegel.puzzleutils.PencilMarksGrid
@@ -59,19 +61,23 @@ private const val EMPTY_CELL_SYMBOL = "/"
 /**
  * Returns the set of hint indices that are confirmed fulfilled, scanning from both ends.
  * A group is confirmed when it's fully bounded by CELL_EMPTY or grid edges (no CELL_UNSET boundary).
+ * When [multiplicationMode] is true, groups are matched by product instead of sum.
  */
-private fun fulfilledHintIndices(rowCells: List<Int>, hints: List<Int>): Set<Int> {
+private fun fulfilledHintIndices(rowCells: List<Int>, hints: List<Int>, multiplicationMode: Boolean = false): Set<Int> {
     if (hints.isEmpty()) return emptySet()
     val result = mutableSetOf<Int>()
+
+    fun aggregate(a: Int, b: Int) = if (multiplicationMode) a * b else a + b
+    val identity = if (multiplicationMode) 1 else 0
 
     // Scan from left
     var hi = 0; var i = 0
     outer@ while (i < rowCells.size && hi < hints.size) {
         when {
             rowCells[i] > 0 -> {
-                var sum = 0; var j = i
-                while (j < rowCells.size && rowCells[j] > 0) { sum += rowCells[j]; j++ }
-                if (sum == hints[hi]) { result.add(hi); hi++; i = j } else break@outer
+                var acc = identity; var j = i
+                while (j < rowCells.size && rowCells[j] > 0) { acc = aggregate(acc, rowCells[j]); j++ }
+                if (acc == hints[hi]) { result.add(hi); hi++; i = j } else break@outer
             }
             rowCells[i] == CELL_EMPTY -> i++
             else -> break@outer
@@ -83,9 +89,9 @@ private fun fulfilledHintIndices(rowCells: List<Int>, hints: List<Int>): Set<Int
     outer@ while (k >= 0 && hi2 >= 0) {
         when {
             rowCells[k] > 0 -> {
-                var sum = 0; var j = k
-                while (j >= 0 && rowCells[j] > 0) { sum += rowCells[j]; j-- }
-                if (sum == hints[hi2]) { result.add(hi2); hi2--; k = j } else break@outer
+                var acc = identity; var j = k
+                while (j >= 0 && rowCells[j] > 0) { acc = aggregate(acc, rowCells[j]); j-- }
+                if (acc == hints[hi2]) { result.add(hi2); hi2--; k = j } else break@outer
             }
             rowCells[k] == CELL_EMPTY -> k--
             else -> break@outer
@@ -108,10 +114,13 @@ private class GameProgress(
 /** Background tint applied when the player marks a cell as "definitely not empty". */
 private val NotEmptyMarkColor = GreenGrey40.copy(alpha = 0.45f)
 
+/** Diagonal cell highlight — soft amber tint composited over the normal cell background. */
+private val DiagonalTint = Amber80.copy(alpha = 0.38f)
+
 // ── Screen entry point ─────────────────────────────────────────────────────────
 
 @Composable
-fun GameScreen(n: Int, onBack: () -> Unit) {
+fun GameScreen(n: Int, diagonalMode: Boolean = false, multiplicationMode: Boolean = false, onBack: () -> Unit) {
     var gameState      by remember { mutableStateOf<GameState?>(null) }
     var elapsedSeconds by remember { mutableStateOf(0L) }
     var timerActive    by remember { mutableStateOf(false) }
@@ -150,7 +159,7 @@ fun GameScreen(n: Int, onBack: () -> Unit) {
             gameState      = null
             timerActive    = false
             elapsedSeconds = 0L
-            val state = withContext(Dispatchers.Default) { PuzzleGenerator.generateGame(n) }
+            val state = withContext(Dispatchers.Default) { PuzzleGenerator.generateGame(n, diagonalMode = diagonalMode, multiplicationMode = multiplicationMode) }
             gameState = state
         }
         timerActive = true
@@ -187,16 +196,24 @@ fun GameScreen(n: Int, onBack: () -> Unit) {
                 resetConfirmTitle = "Clear field?",
                 resetConfirmText  = "This will erase all your entries.",
                 helpTitle         = "How to play",
-                helpText          =
+                helpText          = run {
+                    val diagLine = if (diagonalMode)
+                        "\n\nIn diagonal mode, each number also appears at most once in each of the two main diagonals (highlighted in amber)."
+                    else ""
+                    val hintWord = if (multiplicationMode) "products" else "sums"
+                    val hintExample = if (multiplicationMode)
+                        "For example, \"6,4\" on the left means a group of adjacent cells with product 6, then a gap, then another group with product 4."
+                    else
+                        "For example, \"5,2\" on the left means a group of adjacent cells summing to 5, then a gap, then another group summing to 2."
                     "Fill the $gridSize×$gridSize grid with numbers 1–$n.\n\n" +
-                    "Each number may appear at most once per row and column. " +
+                    "Each number may appear at most once per row and column.$diagLine " +
                     "Not every cell needs a number — use $EMPTY_CELL_SYMBOL to mark a cell as intentionally empty.\n\n" +
-                    "The hints show the sums of consecutive filled cells in each row and column. " +
-                    "For example, \"5,2\" on the left means a group of adjacent cells summing to 5, " +
-                    "then a gap, then another group summing to 2.\n\n" +
+                    "The hints show the $hintWord of consecutive filled cells in each row and column. " +
+                    "$hintExample\n\n" +
                     "Tap a cell to select it, then pick a value below. " +
                     "Switch to pencil mode to note down candidates. " +
                     "Use \"Not empty\" to shade a cell green as a reminder that it must contain a number."
+                }
             )
         }
     ) { innerPadding ->
@@ -323,9 +340,11 @@ private fun PuzzleBoard(
             GameSave.clear(n)
             SolveHistory.add(
                 SolveRecord(
-                    timestamp      = System.currentTimeMillis(),
-                    n              = n,
-                    elapsedSeconds = elapsedSeconds
+                    timestamp          = System.currentTimeMillis(),
+                    n                  = n,
+                    elapsedSeconds     = elapsedSeconds,
+                    diagonalMode       = gameState.diagonalMode,
+                    multiplicationMode = gameState.multiplicationMode
                 ), context
             )
             // Fill any cells the player left unset (solution has CELL_EMPTY there).
@@ -432,7 +451,7 @@ private fun PuzzleBoard(
                     for (c in 0 until gridSize) {
                         val ch = gameState.hints.colHints[c]
                         val colCells = (0 until gridSize).map { r -> cells[r * gridSize + c] }
-                        val fulfilledCol = fulfilledHintIndices(colCells, ch)
+                        val fulfilledCol = fulfilledHintIndices(colCells, ch, gameState.multiplicationMode)
                         // Align hints to the bottom so the last hint sits just above the grid row.
                         // Each hint is in its own fixed-height Box so the layout is predictable.
                         Column(
@@ -464,7 +483,7 @@ private fun PuzzleBoard(
                     Row {
                         val rh = gameState.hints.rowHints[r]
                         val rowCells = (0 until gridSize).map { c -> cells[r * gridSize + c] }
-                        val fulfilledRow = fulfilledHintIndices(rowCells, rh)
+                        val fulfilledRow = fulfilledHintIndices(rowCells, rh, gameState.multiplicationMode)
                         Box(
                             Modifier.width(rowHintStripWidth).height(cellSize),
                             contentAlignment = Alignment.CenterEnd
@@ -492,12 +511,14 @@ private fun PuzzleBoard(
                             val idx   = r * gridSize + c
                             val value = cells[idx]
                             val marks = pencilMarks[idx]
-                            val bgColor = when {
+                            val isDiag = gameState.diagonalMode && (r == c || r + c == gridSize - 1)
+                            val baseBg = when {
                                 value == CELL_EMPTY  -> MaterialTheme.colorScheme.surfaceVariant
                                 value != CELL_UNSET  -> MaterialTheme.colorScheme.primaryContainer
                                 notEmptyMarks[idx]   -> NotEmptyMarkColor
                                 else                 -> MaterialTheme.colorScheme.surface
                             }
+                            val bgColor = if (isDiag) DiagonalTint.compositeOver(baseBg) else baseBg
                             PuzzleGridCell(
                                 cellSize        = cellSize,
                                 isSelected      = idx in selectedCells,

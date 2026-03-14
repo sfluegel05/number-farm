@@ -29,16 +29,20 @@ data class GameHints(
 /**
  * Full state of one puzzle.
  *
- * @param n        Max number: cells hold values 1..n or CELL_EMPTY.
- * @param gridSize Side length of the grid (n+1 for n≤5, n+2 for n>5).
- * @param solution solution[r][c] = CELL_EMPTY or 1..n.
- * @param hints    Row/column group-sum hints shown to the player.
+ * @param n                  Max number: cells hold values 1..n or CELL_EMPTY.
+ * @param gridSize           Side length of the grid (n+1 for n≤5, n+2 for n>5).
+ * @param solution           solution[r][c] = CELL_EMPTY or 1..n.
+ * @param hints              Row/column group hints shown to the player.
+ * @param diagonalMode       Whether the diagonal uniqueness rule is active.
+ * @param multiplicationMode Whether hints are products instead of sums.
  */
 class GameState(
     val n: Int,
     val gridSize: Int,
     val solution: Array<IntArray>,
-    val hints: GameHints
+    val hints: GameHints,
+    val diagonalMode: Boolean = false,
+    val multiplicationMode: Boolean = false
 )
 
 /** Snapshot of an in-progress game that can be restored later. */
@@ -59,17 +63,25 @@ object GameSave : SaveStore<Int, SavedGame>({ it.n })
 data class SolveRecord(
     val timestamp: Long,
     val n: Int,
-    val elapsedSeconds: Long
+    val elapsedSeconds: Long,
+    val diagonalMode: Boolean = false,
+    val multiplicationMode: Boolean = false
 )
 
 /** Persistent solve history, backed by SharedPreferences. */
 object SolveHistory : PersistentHistory<SolveRecord>("solve_history") {
     override fun serialize(record: SolveRecord) =
-        "${record.timestamp},${record.n},${record.elapsedSeconds}"
+        "${record.timestamp},${record.n},${record.elapsedSeconds},${record.diagonalMode},${record.multiplicationMode}"
 
     override fun deserialize(s: String): SolveRecord? = try {
         val p = s.split(",")
-        SolveRecord(p[0].toLong(), p[1].toInt(), p[2].toLong())
+        SolveRecord(
+            timestamp          = p[0].toLong(),
+            n                  = p[1].toInt(),
+            elapsedSeconds     = p[2].toLong(),
+            diagonalMode       = p.getOrNull(3)?.toBooleanStrictOrNull() ?: false,
+            multiplicationMode = p.getOrNull(4)?.toBooleanStrictOrNull() ?: false
+        )
     } catch (_: Exception) { null }
 
     override fun timestampOf(record: SolveRecord) = record.timestamp

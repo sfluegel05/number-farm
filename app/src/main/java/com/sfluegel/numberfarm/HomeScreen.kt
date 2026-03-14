@@ -17,6 +17,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -36,6 +37,10 @@ fun HomeScreen(
     onResume: () -> Unit,
     onNewGame: (Int) -> Unit,
     onStats: () -> Unit,
+    diagonalMode: Boolean,
+    onDiagonalModeChange: (Boolean) -> Unit,
+    multiplicationMode: Boolean,
+    onMultiplicationModeChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val uriHandler = LocalUriHandler.current
@@ -73,12 +78,16 @@ fun HomeScreen(
             if (resumableGame != null) {
                 val mins = resumableGame.elapsedSeconds / 60
                 val secs = resumableGame.elapsedSeconds % 60
+                val modeLabel = buildString {
+                    if (resumableGame.gameState.diagonalMode) append("  ·  diagonal")
+                    if (resumableGame.gameState.multiplicationMode) append("  ·  ×")
+                }
                 Button(
                     onClick  = onResume,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text     = "Resume 1..${resumableGame.n}  ·  (%d:%02d)".format(mins, secs),
+                        text     = "Resume 1..${resumableGame.n}$modeLabel  ·  (%d:%02d)".format(mins, secs),
                         fontSize = 16.sp
                     )
                 }
@@ -112,6 +121,60 @@ fun HomeScreen(
                 for (size in listOf(7, 8, 9)) {
                     SizeButton(size = size, onClick = { onNewGame(size) })
                 }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // ── Diagonal mode toggle ─────────────────────────────────────────
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text       = "Diagonal mode",
+                        fontSize   = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        color      = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text     = "Each number once per diagonal",
+                        fontSize = 13.sp,
+                        color    = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked         = diagonalMode,
+                    onCheckedChange = onDiagonalModeChange
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // ── Multiplication mode toggle ────────────────────────────────────
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text       = "Multiplication mode",
+                        fontSize   = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        color      = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text     = "Hints show products instead of sums",
+                        fontSize = 13.sp,
+                        color    = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked         = multiplicationMode,
+                    onCheckedChange = onMultiplicationModeChange
+                )
             }
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -151,6 +214,6 @@ private fun SizeButton(size: Int, onClick: () -> Unit) {
 @Composable
 fun HomeScreenPreview() {
     NumberFarmTheme {
-        HomeScreen(resumableGame = null, onResume = {}, onNewGame = {}, onStats = {})
+        HomeScreen(resumableGame = null, onResume = {}, onNewGame = {}, onStats = {}, diagonalMode = false, onDiagonalModeChange = {}, multiplicationMode = false, onMultiplicationModeChange = {})
     }
 }

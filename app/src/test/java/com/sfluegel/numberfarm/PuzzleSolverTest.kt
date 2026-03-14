@@ -128,34 +128,34 @@ class PuzzleSolverTest {
     }
 
     // -------------------------------------------------------------------------
-    // sumValid
+    // aggregateValid
     // -------------------------------------------------------------------------
 
     @Test
     fun `sumValid - zero numbers placed`() {
-        assertTrue(PuzzleSolverRowBased.sumValid(listOf(3, 2), intArrayOf(CELL_UNSET, CELL_UNSET)))
+        assertTrue(PuzzleSolverRowBased.aggregateValid(listOf(3, 2), intArrayOf(CELL_UNSET, CELL_UNSET)))
     }
 
     @Test
     fun `sumValid - placed sum equals hint sum`() {
-        assertTrue(PuzzleSolverRowBased.sumValid(listOf(3, 2), intArrayOf(3, 2, CELL_UNSET)))
+        assertTrue(PuzzleSolverRowBased.aggregateValid(listOf(3, 2), intArrayOf(3, 2, CELL_UNSET)))
     }
 
     @Test
     fun `sumValid - placed sum exceeds hint sum`() {
-        assertFalse(PuzzleSolverRowBased.sumValid(listOf(3), intArrayOf(2, 2, CELL_UNSET)))
+        assertFalse(PuzzleSolverRowBased.aggregateValid(listOf(3), intArrayOf(2, 2, CELL_UNSET)))
     }
 
     @Test
     fun `sumValid - CELL_EMPTY cells are not counted`() {
         // Row [2,0,UNSET]: only 2 is a positive value; hintSum=3; 2<=3 → true.
-        assertTrue(PuzzleSolverRowBased.sumValid(listOf(3), intArrayOf(2, 0, CELL_UNSET)))
+        assertTrue(PuzzleSolverRowBased.aggregateValid(listOf(3), intArrayOf(2, 0, CELL_UNSET)))
     }
 
     @Test
     fun `sumValid - empty hints sum is zero`() {
         // Any positive value would exceed 0.
-        assertFalse(PuzzleSolverRowBased.sumValid(emptyList(), intArrayOf(1, CELL_UNSET)))
+        assertFalse(PuzzleSolverRowBased.aggregateValid(emptyList(), intArrayOf(1, CELL_UNSET)))
     }
 
     // -------------------------------------------------------------------------

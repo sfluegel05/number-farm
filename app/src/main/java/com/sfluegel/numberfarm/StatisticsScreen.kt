@@ -34,6 +34,24 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+// Emoji symbols used throughout statistics
+private const val DIAGONAL_EMOJI       = "↗"
+private const val MULTIPLICATION_EMOJI = "✕"
+
+/** Compact label for a configuration, e.g. "1..5", "1..5 ↗", "1..5 ✕", "1..5 ↗✕". */
+private fun configLabel(n: Int, diagonalMode: Boolean, multiplicationMode: Boolean): String {
+    val modes = buildString {
+        if (diagonalMode) append(" $DIAGONAL_EMOJI")
+        if (multiplicationMode) append(" $MULTIPLICATION_EMOJI")
+    }
+    return "1..$n$modes"
+}
+
+/** Grouping key for solve records. */
+private data class SolveConfig(val n: Int, val diagonalMode: Boolean, val multiplicationMode: Boolean)
+
+private val SolveRecord.config get() = SolveConfig(n, diagonalMode, multiplicationMode)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StatisticsScreen(onBack: () -> Unit) {
@@ -65,9 +83,9 @@ fun StatisticsScreen(onBack: () -> Unit) {
             }
         } else {
             val grouped = records
-                .groupBy { it.n }
+                .groupBy { it.config }
                 .entries
-                .sortedBy { it.key }
+                .sortedWith(compareBy({ it.key.n }, { it.key.diagonalMode }, { it.key.multiplicationMode }))
                 .map { it.toPair() }
 
             LazyColumn(
@@ -79,14 +97,14 @@ fun StatisticsScreen(onBack: () -> Unit) {
             ) {
                 item {
                     Text(
-                        "By Size",
+                        "By Configuration",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(Modifier.height(4.dp))
                 }
-                items(grouped) { (n, solves) ->
-                    SizeCard(n, solves)
+                items(grouped) { (config, solves) ->
+                    ConfigCard(config, solves)
                 }
 
                 item { Spacer(Modifier.height(8.dp)) }
@@ -121,7 +139,7 @@ private fun formatDateTime(ts: Long): String =
 // ── Cards and rows ────────────────────────────────────────────────────────────
 
 @Composable
-private fun SizeCard(n: Int, solves: List<SolveRecord>) {
+private fun ConfigCard(config: SolveConfig, solves: List<SolveRecord>) {
     val avgSecs = solves.map { it.elapsedSeconds }.average().toLong()
     val fastest = solves.minBy { it.elapsedSeconds }
     val slowest = solves.maxBy { it.elapsedSeconds }
@@ -131,7 +149,11 @@ private fun SizeCard(n: Int, solves: List<SolveRecord>) {
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text("1..$n", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text(
+                configLabel(config.n, config.diagonalMode, config.multiplicationMode),
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 15.sp
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("${solves.size} solve${if (solves.size == 1) "" else "s"}")
                 Text("Avg: ${formatTime(avgSecs)}")
@@ -160,7 +182,11 @@ private fun HistoryItem(record: SolveRecord) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column {
-            Text("1..${record.n}", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+            Text(
+                configLabel(record.n, record.diagonalMode, record.multiplicationMode),
+                fontWeight = FontWeight.Medium,
+                fontSize = 14.sp
+            )
             Text(
                 formatDateTime(record.timestamp),
                 fontSize = 12.sp,

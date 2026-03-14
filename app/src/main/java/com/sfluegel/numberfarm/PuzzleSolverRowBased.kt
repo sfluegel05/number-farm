@@ -19,10 +19,12 @@ object PuzzleSolverRowBased {
      * matches [hints] in order.
      * Groups containing CELL_UNSET are skipped; validation stops after the first such group.
      * Used for pruning during row enumeration.
+     * When [multiplicationMode] is true, groups are compared by product instead of sum.
      */
-    fun hintsFulfilled(hints: List<Int>, row: IntArray): Boolean {
+    fun hintsFulfilled(hints: List<Int>, row: IntArray, multiplicationMode: Boolean = false): Boolean {
         var hintIdx = 0
-        var sum = 0
+        var acc = if (multiplicationMode) 1 else 0
+        var groupHasValues = false
         var groupHasUnset = false
         var seenIncompleteGroup = false
 
@@ -30,23 +32,27 @@ object PuzzleSolverRowBased {
             when {
                 v == CELL_UNSET -> groupHasUnset = true
                 v == CELL_EMPTY -> {
-                    if (sum > 0 || groupHasUnset) {
+                    if (groupHasValues || groupHasUnset) {
                         when {
                             groupHasUnset -> seenIncompleteGroup = true
                             !seenIncompleteGroup -> {
-                                if (hintIdx >= hints.size || hints[hintIdx] != sum) return false
+                                if (hintIdx >= hints.size || hints[hintIdx] != acc) return false
                                 hintIdx++
                             }
                         }
                     }
-                    sum = 0
+                    acc = if (multiplicationMode) 1 else 0
+                    groupHasValues = false
                     groupHasUnset = false
                 }
-                else -> sum += v
+                else -> {
+                    acc = if (multiplicationMode) acc * v else acc + v
+                    groupHasValues = true
+                }
             }
         }
-        if (sum > 0 && !groupHasUnset && !seenIncompleteGroup) {
-            if (hintIdx >= hints.size || hints[hintIdx] != sum) return false
+        if (groupHasValues && !groupHasUnset && !seenIncompleteGroup) {
+            if (hintIdx >= hints.size || hints[hintIdx] != acc) return false
         }
         return true
     }
@@ -54,60 +60,76 @@ object PuzzleSolverRowBased {
     /**
      * Returns true if the fully-determined [row] (no CELL_UNSET) uses exactly [hints].
      * Returns true early if any CELL_UNSET is present (row not yet complete).
+     * When [multiplicationMode] is true, groups are compared by product instead of sum.
      */
-    fun hintsUsed(hints: List<Int>, row: IntArray): Boolean {
+    fun hintsUsed(hints: List<Int>, row: IntArray, multiplicationMode: Boolean = false): Boolean {
         var hintIdx = 0
-        var targetSum = if (hints.isNotEmpty()) hints[0] else 0
-        var sum = 0
+        var targetHint = if (hints.isNotEmpty()) hints[0] else (if (multiplicationMode) 1 else 0)
+        var acc = if (multiplicationMode) 1 else 0
+        var groupHasValues = false
         for (v in row) {
             when {
                 v == CELL_UNSET -> return true
                 v == CELL_EMPTY -> {
-                    if (sum > 0) {
-                        if (sum != targetSum) return false
+                    if (groupHasValues) {
+                        if (acc != targetHint) return false
                         hintIdx++
-                        targetSum = if (hintIdx < hints.size) hints[hintIdx] else 0
+                        targetHint = if (hintIdx < hints.size) hints[hintIdx] else (if (multiplicationMode) 1 else 0)
                     }
-                    sum = 0
+                    acc = if (multiplicationMode) 1 else 0
+                    groupHasValues = false
                 }
-                else -> sum += v
+                else -> {
+                    acc = if (multiplicationMode) acc * v else acc + v
+                    groupHasValues = true
+                }
             }
         }
-        if (sum > 0) {
-            if (sum != targetSum) return false
+        if (groupHasValues) {
+            if (acc != targetHint) return false
             hintIdx++
         }
         return hintIdx == hints.size
     }
 
     /**
-     * Returns true if the sum of placed numbers does not exceed the total hint sum.
-     * Provides early pruning during row enumeration (CELL_UNSET is ignored).
+     * Returns true if the aggregate of placed numbers does not exceed the total hint aggregate.
+     * Provides early pruning during row enumeration (CELL_UNSET and CELL_EMPTY are ignored).
+     * When [multiplicationMode] is true, compares products instead of sums.
      */
-    fun sumValid(hints: List<Int>, row: IntArray): Boolean {
-        val rowSum = row.filter { it > 0 }.sum()
-        return rowSum <= hints.sum()
+    fun aggregateValid(hints: List<Int>, row: IntArray, multiplicationMode: Boolean = false): Boolean {
+        return if (multiplicationMode) {
+            val rowProduct   = row.filter { it > 0 }.fold(1) { a, v -> a * v }
+            val hintProduct  = hints.fold(1) { a, h -> a * h }
+            rowProduct <= hintProduct
+        } else {
+            row.filter { it > 0 }.sum() <= hints.sum()
+        }
     }
 
     /**
      * Returns true if a partial column (rows 0..r, each cell is CELL_EMPTY or 1..n,
      * no CELL_UNSET) is consistent with [hints]:
      *  - All completed groups (terminated by CELL_EMPTY) match hints in order.
-     *  - The ongoing running group sum does not already exceed the next expected hint.
+     *  - The ongoing running group aggregate does not already exceed the next expected hint.
+     * When [multiplicationMode] is true, groups are compared by product instead of sum.
      */
-    fun isColPartialConsistent(hints: List<Int>, partial: IntArray): Boolean {
+    fun isColPartialConsistent(hints: List<Int>, partial: IntArray, multiplicationMode: Boolean = false): Boolean {
         var hintIdx = 0
-        var sum = 0
+        var acc = if (multiplicationMode) 1 else 0
+        var groupHasValues = false
         for (v in partial) {
             if (v == CELL_EMPTY) {
-                if (sum > 0) {
-                    if (hintIdx >= hints.size || hints[hintIdx] != sum) return false
+                if (groupHasValues) {
+                    if (hintIdx >= hints.size || hints[hintIdx] != acc) return false
                     hintIdx++
                 }
-                sum = 0
+                acc = if (multiplicationMode) 1 else 0
+                groupHasValues = false
             } else {
-                sum += v
-                if (hintIdx >= hints.size || sum > hints[hintIdx]) return false
+                acc = if (multiplicationMode) acc * v else acc + v
+                groupHasValues = true
+                if (hintIdx >= hints.size || acc > hints[hintIdx]) return false
             }
         }
         return true
@@ -120,12 +142,12 @@ object PuzzleSolverRowBased {
      * @param allowed Optional per-position value filters. When provided, only values present in
      *                [allowed][pos] are tried at each position. Pass null to allow all values.
      */
-    fun getValidRows(n: Int, gridSize: Int, hints: List<Int>, allowed: Array<Set<Int>>? = null): List<IntArray> {
+    fun getValidRows(n: Int, gridSize: Int, hints: List<Int>, allowed: Array<Set<Int>>? = null, multiplicationMode: Boolean = false): List<IntArray> {
         val results = mutableListOf<IntArray>()
         val current = IntArray(gridSize) { CELL_UNSET }
 
         fun isPartialOk(row: IntArray): Boolean =
-            hintsFulfilled(hints, row) && hintsUsed(hints, row) && sumValid(hints, row)
+            hintsFulfilled(hints, row, multiplicationMode) && hintsUsed(hints, row, multiplicationMode) && aggregateValid(hints, row, multiplicationMode)
 
         fun backtrack(pos: Int, availableNumbers: List<Int>) {
             if (pos == gridSize) {
@@ -147,8 +169,8 @@ object PuzzleSolverRowBased {
     }
 
     /** True iff [hints] have exactly one solution (stops after finding 2). */
-    fun isUnique(n: Int, gridSize: Int, hints: GameHints): Boolean {
-        val sols = countSolutions(n, gridSize, hints, maxCount = 2, useAC3 = false)
+    fun isUnique(n: Int, gridSize: Int, hints: GameHints, diagonalMode: Boolean = false, multiplicationMode: Boolean = false): Boolean {
+        val sols = countSolutions(n, gridSize, hints, maxCount = 2, useAC3 = false, diagonalMode = diagonalMode, multiplicationMode = multiplicationMode)
         if (sols == 0) println("No solutions found for hints: $hints")
         else if (sols > 1) println("Multiple solutions found for hints: $hints")
         return sols == 1
@@ -160,7 +182,9 @@ object PuzzleSolverRowBased {
         gridSize: Int,
         hints: GameHints,
         maxCount: Int = Int.MAX_VALUE,
-        useAC3: Boolean = true
+        useAC3: Boolean = true,
+        diagonalMode: Boolean = false,
+        multiplicationMode: Boolean = false
     ): Int {
         // possible[r][c] = values that can appear at cell (r,c) given configs generated so far.
         // Starts as the full domain {CELL_EMPTY, 1..n}; narrowed after each row/column is generated.
@@ -169,21 +193,22 @@ object PuzzleSolverRowBased {
         val rowConfigs = MutableList<List<IntArray>>(gridSize) { emptyList() }
         val colConfigs = MutableList<List<IntArray>>(gridSize) { emptyList() }
 
-        // Start with row 0, then col 0, then row 1, then col 1, etc., always picking the next item with the smallest minimum hint.
+        // Start with row 0, then col 0, then row 1, then col 1, etc., always picking the next item with the smallest aggregate hint.
+        fun List<Int>.totalAggregate() = if (multiplicationMode) fold(1) { a, h -> a * h } else sum()
         val items = ((0 until gridSize).map { true to it } + (0 until gridSize).map { false to it })
-            .sortedBy { (isRow, idx) -> if (isRow) hints.rowHints[idx].sum() else hints.colHints[idx].sum() }
+            .sortedBy { (isRow, idx) -> if (isRow) hints.rowHints[idx].totalAggregate() else hints.colHints[idx].totalAggregate() }
 
         for ((isRow, idx) in items) {
             if (isRow) {
                 val allowed = Array(gridSize) { c -> possible[idx][c].toSet() }
-                rowConfigs[idx] = getValidRows(n, gridSize, hints.rowHints[idx], allowed)
+                rowConfigs[idx] = getValidRows(n, gridSize, hints.rowHints[idx], allowed, multiplicationMode)
                 // Narrow possible[idx][c] to only values that actually appear in any config.
                 for (c in 0 until gridSize) {
                     possible[idx][c].retainAll(rowConfigs[idx].mapTo(mutableSetOf()) { it[c] })
                 }
             } else {
                 val allowed = Array(gridSize) { r -> possible[r][idx].toSet() }
-                colConfigs[idx] = getValidRows(n, gridSize, hints.colHints[idx], allowed)
+                colConfigs[idx] = getValidRows(n, gridSize, hints.colHints[idx], allowed, multiplicationMode)
                 // Narrow possible[r][idx] to only values that actually appear in any config.
                 for (r in 0 until gridSize) {
                     possible[r][idx].retainAll(colConfigs[idx].mapTo(mutableSetOf()) { it[r] })
@@ -295,7 +320,10 @@ object PuzzleSolverRowBased {
 
         val grid = Array(gridSize) { IntArray(gridSize) { CELL_EMPTY } }
         // colUsed[c][v] = true if value v has been placed in column c already.
-        val colUsed = Array(gridSize) { BooleanArray(n + 1) }
+        val colUsed      = Array(gridSize) { BooleanArray(n + 1) }
+        // diagUsed[v] / antiDiagUsed[v] = true if value v has been placed on that diagonal.
+        val diagUsed     = if (diagonalMode) BooleanArray(n + 1) else null
+        val antiDiagUsed = if (diagonalMode) BooleanArray(n + 1) else null
 
         var count = 0
 
@@ -306,7 +334,7 @@ object PuzzleSolverRowBased {
                 // All rows placed — verify full column hints.
                 for (c in 0 until gridSize) {
                     val col = IntArray(gridSize) { grid[it][c] }
-                    if (!hintsUsed(hints.colHints[c], col)) return true
+                    if (!hintsUsed(hints.colHints[c], col, multiplicationMode)) return true
                 }
                 count++
                 return count < maxCount
@@ -318,17 +346,33 @@ object PuzzleSolverRowBased {
                     if (config[c] != CELL_EMPTY && colUsed[c][config[c]]) continue@outer
                 }
 
+                // Reject configurations that violate diagonal uniqueness.
+                if (diagonalMode) {
+                    val mainVal = config[row]
+                    if (mainVal != CELL_EMPTY && diagUsed!![mainVal]) continue@outer
+                    val antiCol = gridSize - 1 - row
+                    val antiVal = config[antiCol]
+                    if (antiVal != CELL_EMPTY && antiDiagUsed!![antiVal]) continue@outer
+                }
+
                 // Place the row.
                 for (c in 0 until gridSize) {
                     grid[row][c] = config[c]
                     if (config[c] != CELL_EMPTY) colUsed[c][config[c]] = true
+                }
+                if (diagonalMode) {
+                    val mainVal = config[row]
+                    if (mainVal != CELL_EMPTY) diagUsed!![mainVal] = true
+                    val antiCol = gridSize - 1 - row
+                    val antiVal = config[antiCol]
+                    if (antiVal != CELL_EMPTY) antiDiagUsed!![antiVal] = true
                 }
 
                 // Prune: each partial column must still be hint-consistent.
                 var colsOk = true
                 for (c in 0 until gridSize) {
                     val partial = IntArray(row + 1) { grid[it][c] }
-                    if (!isColPartialConsistent(hints.colHints[c], partial)) {
+                    if (!isColPartialConsistent(hints.colHints[c], partial, multiplicationMode)) {
                         colsOk = false
                         break
                     }
@@ -339,6 +383,13 @@ object PuzzleSolverRowBased {
                         if (config[c] != CELL_EMPTY) colUsed[c][config[c]] = false
                         grid[row][c] = CELL_EMPTY
                     }
+                    if (diagonalMode) {
+                        val mainVal = config[row]
+                        if (mainVal != CELL_EMPTY) diagUsed!![mainVal] = false
+                        val antiCol = gridSize - 1 - row
+                        val antiVal = config[antiCol]
+                        if (antiVal != CELL_EMPTY) antiDiagUsed!![antiVal] = false
+                    }
                     return false
                 }
 
@@ -346,6 +397,13 @@ object PuzzleSolverRowBased {
                 for (c in 0 until gridSize) {
                     if (config[c] != CELL_EMPTY) colUsed[c][config[c]] = false
                     grid[row][c] = CELL_EMPTY
+                }
+                if (diagonalMode) {
+                    val mainVal = config[row]
+                    if (mainVal != CELL_EMPTY) diagUsed!![mainVal] = false
+                    val antiCol = gridSize - 1 - row
+                    val antiVal = config[antiCol]
+                    if (antiVal != CELL_EMPTY) antiDiagUsed!![antiVal] = false
                 }
             }
             return true

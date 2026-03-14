@@ -13,15 +13,15 @@ object PuzzleGenerator {
      *  3. Run the solver to verify the hints have a unique solution.
      *  4. Retry up to [maxAttempts] times; fall back to a non-unique puzzle if needed.
      */
-    fun generateGame(n: Int, maxAttempts: Int = 100): GameState {
+    fun generateGame(n: Int, maxAttempts: Int = 100, diagonalMode: Boolean = false, multiplicationMode: Boolean = false): GameState {
         val gridSize = gridSizeFor(n)
         val rng = Random.Default
         repeat(maxAttempts) {
-            val solution = generateSolution(n, gridSize, rng)
-            val hints    = computeHints(solution, gridSize)
-            if (PuzzleSolverRowBased.isUnique(n, gridSize, hints)) {
+            val solution = generateSolution(n, gridSize, rng, diagonalMode)
+            val hints    = computeHints(solution, gridSize, multiplicationMode)
+            if (PuzzleSolverRowBased.isUnique(n, gridSize, hints, diagonalMode, multiplicationMode)) {
                 println("Generated unique puzzle for n=$n in attempt ${it + 1}")
-                return GameState(n, gridSize, solution, hints)
+                return GameState(n, gridSize, solution, hints, diagonalMode, multiplicationMode)
             }
             else {
                 println("Attempt ${it + 1}: generated puzzle for n=$n but it is not unique; retrying...")
@@ -30,18 +30,21 @@ object PuzzleGenerator {
         }
         println("Failed to generate unique puzzle for n=$n after $maxAttempts attempts; returning non-unique puzzle.")
         // Fallback: return a puzzle even if not proven unique.
-        val solution = generateSolution(n, gridSize, rng)
-        return GameState(n, gridSize, solution, computeHints(solution, gridSize))
+        val solution = generateSolution(n, gridSize, rng, diagonalMode)
+        return GameState(n, gridSize, solution, computeHints(solution, gridSize, multiplicationMode), diagonalMode, multiplicationMode)
     }
 
     /**
      * Fills a grid randomly.
      * Each number 1..n appears at most once per row and at most once per column.
+     * When [diagonalMode] is true, each number also appears at most once per diagonal.
      * Not every cell needs to be filled; density is chosen randomly per row.
      */
-    private fun generateSolution(n: Int, gridSize: Int, rng: Random): Array<IntArray> {
-        val grid    = Array(gridSize) { IntArray(gridSize) { CELL_EMPTY } }
-        val colUsed = Array(gridSize) { BooleanArray(n + 1) }
+    private fun generateSolution(n: Int, gridSize: Int, rng: Random, diagonalMode: Boolean = false): Array<IntArray> {
+        val grid         = Array(gridSize) { IntArray(gridSize) { CELL_EMPTY } }
+        val colUsed      = Array(gridSize) { BooleanArray(n + 1) }
+        val diagUsed     = if (diagonalMode) BooleanArray(n + 1) else null
+        val antiDiagUsed = if (diagonalMode) BooleanArray(n + 1) else null
 
         for (r in 0 until gridSize) {
             val numbers   = (1..n).shuffled(rng)
@@ -54,10 +57,17 @@ object PuzzleGenerator {
             for (num in numbers) {
                 if (placed >= target) break
                 for (pos in positions) {
-                    if (!rowUsed[num] && !colUsed[pos][num] && grid[r][pos] == CELL_EMPTY) {
+                    val onMainDiag = r == pos
+                    val onAntiDiag = r + pos == gridSize - 1
+                    if (!rowUsed[num] && !colUsed[pos][num] && grid[r][pos] == CELL_EMPTY
+                        && !(diagonalMode && onMainDiag && diagUsed!![num])
+                        && !(diagonalMode && onAntiDiag && antiDiagUsed!![num])
+                    ) {
                         grid[r][pos] = num
-                        rowUsed[num]     = true
+                        rowUsed[num]      = true
                         colUsed[pos][num] = true
+                        if (diagonalMode && onMainDiag) diagUsed!![num]     = true
+                        if (diagonalMode && onAntiDiag) antiDiagUsed!![num] = true
                         placed++
                         break
                     }
@@ -67,24 +77,26 @@ object PuzzleGenerator {
         return grid
     }
 
-    /** Computes group-sum hints from a filled solution grid. */
-    fun computeHints(grid: Array<IntArray>, gridSize: Int): GameHints {
-        val rowHints = List(gridSize) { r -> groupSums(List(gridSize) { c -> grid[r][c] }) }
-        val colHints = List(gridSize) { c -> groupSums(List(gridSize) { r -> grid[r][c] }) }
+    /** Computes group-sum (or group-product) hints from a filled solution grid. */
+    fun computeHints(grid: Array<IntArray>, gridSize: Int, multiplicationMode: Boolean = false): GameHints {
+        val rowHints = List(gridSize) { r -> groupAggregates(List(gridSize) { c -> grid[r][c] }, multiplicationMode) }
+        val colHints = List(gridSize) { c -> groupAggregates(List(gridSize) { r -> grid[r][c] }, multiplicationMode) }
         return GameHints(rowHints, colHints)
     }
 
-    private fun groupSums(cells: List<Int>): List<Int> {
-        val groups = mutableListOf<Int>()
-        var sum    = 0
+    private fun groupAggregates(cells: List<Int>, multiplicationMode: Boolean = false): List<Int> {
+        val groups      = mutableListOf<Int>()
+        var acc         = if (multiplicationMode) 1 else 0
+        var groupHasValues = false
         for (v in cells) {
             if (v > 0) {
-                sum += v
+                acc = if (multiplicationMode) acc * v else acc + v
+                groupHasValues = true
             } else {
-                if (sum > 0) { groups.add(sum); sum = 0 }
+                if (groupHasValues) { groups.add(acc); acc = if (multiplicationMode) 1 else 0; groupHasValues = false }
             }
         }
-        if (sum > 0) groups.add(sum)
+        if (groupHasValues) groups.add(acc)
         return groups
     }
 }
