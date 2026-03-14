@@ -100,7 +100,16 @@ fun HomeScreen(
                 modifier              = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
             ) {
-                for (size in listOf(3, 5, 7, 9)) {
+                for (size in listOf(3, 4, 5, 6)) {
+                    SizeButton(size = size, onClick = { onNewGame(size) })
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
+            ) {
+                for (size in listOf(7, 8, 9)) {
                     SizeButton(size = size, onClick = { onNewGame(size) })
                 }
             }
