@@ -12,7 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import com.sfluegel.numberfarm.ui.theme.NumberFarmTheme
+import com.example.compose.NumberFarmTheme
 
 private sealed class Screen {
     object Home       : Screen()
