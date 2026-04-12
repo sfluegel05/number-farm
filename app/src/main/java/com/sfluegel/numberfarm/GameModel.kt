@@ -15,15 +15,21 @@ fun gridSizeFor(n: Int) = if (n <= 5) n + 1 else n + 2
 /**
  * Hints for one puzzle.
  *
- * rowHints[r] = consecutive group sums in row r, left-to-right.
- * colHints[c] = consecutive group sums in column c, top-to-bottom.
+ * rowHints[r]  = consecutive group aggregates in row r, left-to-right.
+ * colHints[c]  = consecutive group aggregates in column c, top-to-bottom.
+ * diagHints    = group aggregates along the main diagonal (↘), top-to-bottom.
+ *                Empty when not in diagonal mode.
+ * antiDiagHints = group aggregates along the anti-diagonal (↗), top-to-bottom.
+ *                Empty when not in diagonal mode.
  *
  * A "group" is a maximal run of adjacent non-empty cells.
- * E.g. row [1, 4, EMPTY, 2] → rowHints = [5, 2].
+ * E.g. row [1, 4, EMPTY, 2] → hints = [5, 2] (sum) or [4, 2] (product).
  */
 data class GameHints(
     val rowHints: List<List<Int>>,
-    val colHints: List<List<Int>>
+    val colHints: List<List<Int>>,
+    val diagHints: List<Int> = emptyList(),
+    val antiDiagHints: List<Int> = emptyList()
 )
 
 /**
@@ -35,6 +41,9 @@ data class GameHints(
  * @param hints              Row/column group hints shown to the player.
  * @param diagonalMode       Whether the diagonal uniqueness rule is active.
  * @param multiplicationMode Whether hints are products instead of sums.
+ * @param prefilledCells     Cells revealed to the player to guarantee a unique solution.
+ *                           Maps cell index (r*gridSize+c) to value (CELL_EMPTY or 1..n).
+ *                           Pre-filled cells are shown as non-editable from the start.
  */
 class GameState(
     val n: Int,
@@ -42,7 +51,8 @@ class GameState(
     val solution: Array<IntArray>,
     val hints: GameHints,
     val diagonalMode: Boolean = false,
-    val multiplicationMode: Boolean = false
+    val multiplicationMode: Boolean = false,
+    val prefilledCells: Map<Int, Int> = emptyMap()
 )
 
 /** Snapshot of an in-progress game that can be restored later. */

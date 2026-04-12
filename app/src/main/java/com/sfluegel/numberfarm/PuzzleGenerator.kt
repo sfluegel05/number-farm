@@ -11,27 +11,77 @@ object PuzzleGenerator {
      *  1. Randomly fill a gridSize×gridSize grid (each number at most once per row/column).
      *  2. Compute row/column group-sum hints.
      *  3. Run the solver to verify the hints have a unique solution.
-     *  4. Retry up to [maxAttempts] times; fall back to a non-unique puzzle if needed.
+     *  4. Retry up to [maxAttempts] times.
+     *  5. If no unique puzzle is found, fall back to pre-filling disambiguating cells:
+     *     find two differing solutions, reveal a cell that differs (using the original
+     *     solution's value), repeat until unique.
      */
-    fun generateGame(n: Int, maxAttempts: Int = 100, diagonalMode: Boolean = false, multiplicationMode: Boolean = false): GameState {
+    fun generateGame(n: Int, maxAttempts: Int = 10, diagonalMode: Boolean = false, multiplicationMode: Boolean = false): GameState {
         val gridSize = gridSizeFor(n)
         val rng = Random.Default
         repeat(maxAttempts) {
             val solution = generateSolution(n, gridSize, rng, diagonalMode)
-            val hints    = computeHints(solution, gridSize, multiplicationMode)
+            val hints    = computeHints(solution, gridSize, multiplicationMode, diagonalMode)
             if (PuzzleSolverRowBased.isUnique(n, gridSize, hints, diagonalMode, multiplicationMode)) {
                 println("Generated unique puzzle for n=$n in attempt ${it + 1}")
                 return GameState(n, gridSize, solution, hints, diagonalMode, multiplicationMode)
             }
             else {
                 println("Attempt ${it + 1}: generated puzzle for n=$n but it is not unique; retrying...")
-                println("The hints were: rowHints=${hints.rowHints} colHints=${hints.colHints}")
             }
         }
-        println("Failed to generate unique puzzle for n=$n after $maxAttempts attempts; returning non-unique puzzle.")
-        // Fallback: return a puzzle even if not proven unique.
+        println("Failed to generate unique puzzle for n=$n after $maxAttempts attempts; using pre-fill disambiguation.")
+        return generateWithPrefills(n, gridSize, rng, diagonalMode, multiplicationMode)
+    }
+
+    /**
+     * Generates a puzzle that may contain pre-filled cells to guarantee uniqueness.
+     *
+     * Finds two valid solutions, reveals the cell (using the original solution's value) where
+     * they differ, and repeats until the puzzle has exactly one solution.
+     */
+    private fun generateWithPrefills(n: Int, gridSize: Int, rng: Random, diagonalMode: Boolean, multiplicationMode: Boolean): GameState {
         val solution = generateSolution(n, gridSize, rng, diagonalMode)
-        return GameState(n, gridSize, solution, computeHints(solution, gridSize, multiplicationMode), diagonalMode, multiplicationMode)
+        val hints    = computeHints(solution, gridSize, multiplicationMode, diagonalMode)
+        val prefilledCells = mutableMapOf<Int, Int>() // cell index (r*gridSize+c) -> value
+
+        for (attempt in 0 until gridSize * gridSize) { // safety bound; loop always terminates before this
+            val twoSolutions = mutableListOf<Array<IntArray>>()
+            PuzzleSolverRowBased.countSolutions(
+                n, gridSize, hints,
+                maxCount           = 2,
+                useAC3             = false,
+                diagonalMode       = diagonalMode,
+                multiplicationMode = multiplicationMode,
+                prefilledCells     = prefilledCells,
+                collectSolutions   = twoSolutions
+            )
+
+            if (twoSolutions.size == 1) {
+                return GameState(n, gridSize, solution, hints, diagonalMode, multiplicationMode, prefilledCells)
+            } else if (twoSolutions.size < 2) {
+                break // no solution — shouldn't happen; original solution always satisfies hints
+            }
+
+            // Find a cell where the two solutions differ and reveal the original solution's value.
+            val sol1 = twoSolutions[0]
+            val sol2 = twoSolutions[1]
+            var found = false
+            outer@ for (r in 0 until gridSize) {
+                for (c in 0 until gridSize) {
+                    val idx = r * gridSize + c
+                    if (sol1[r][c] != sol2[r][c] && idx !in prefilledCells) {
+                        prefilledCells[idx] = solution[r][c]
+                        found = true
+                        break@outer
+                    }
+                }
+            }
+            if (!found) break // all differing cells already pre-filled; shouldn't happen
+        }
+
+        // Fallback: return whatever we have (should already be unique after the loop).
+        return GameState(n, gridSize, solution, hints, diagonalMode, multiplicationMode, prefilledCells)
     }
 
     /**
@@ -78,10 +128,12 @@ object PuzzleGenerator {
     }
 
     /** Computes group-sum (or group-product) hints from a filled solution grid. */
-    fun computeHints(grid: Array<IntArray>, gridSize: Int, multiplicationMode: Boolean = false): GameHints {
-        val rowHints = List(gridSize) { r -> groupAggregates(List(gridSize) { c -> grid[r][c] }, multiplicationMode) }
-        val colHints = List(gridSize) { c -> groupAggregates(List(gridSize) { r -> grid[r][c] }, multiplicationMode) }
-        return GameHints(rowHints, colHints)
+    fun computeHints(grid: Array<IntArray>, gridSize: Int, multiplicationMode: Boolean = false, diagonalMode: Boolean = false): GameHints {
+        val rowHints      = List(gridSize) { r -> groupAggregates(List(gridSize) { c -> grid[r][c] }, multiplicationMode) }
+        val colHints      = List(gridSize) { c -> groupAggregates(List(gridSize) { r -> grid[r][c] }, multiplicationMode) }
+        val diagHints     = if (diagonalMode) groupAggregates(List(gridSize) { i -> grid[i][i] }, multiplicationMode) else emptyList()
+        val antiDiagHints = if (diagonalMode) groupAggregates(List(gridSize) { i -> grid[i][gridSize - 1 - i] }, multiplicationMode) else emptyList()
+        return GameHints(rowHints, colHints, diagHints, antiDiagHints)
     }
 
     private fun groupAggregates(cells: List<Int>, multiplicationMode: Boolean = false): List<Int> {

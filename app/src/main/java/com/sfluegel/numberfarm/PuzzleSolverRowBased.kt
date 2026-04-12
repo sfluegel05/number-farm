@@ -145,26 +145,41 @@ object PuzzleSolverRowBased {
     fun getValidRows(n: Int, gridSize: Int, hints: List<Int>, allowed: Array<Set<Int>>? = null, multiplicationMode: Boolean = false): List<IntArray> {
         val results = mutableListOf<IntArray>()
         val current = IntArray(gridSize) { CELL_UNSET }
+        val usedNumbers = BooleanArray(n + 1) // index 1..n; true if that number is already placed
 
-        fun isPartialOk(row: IntArray): Boolean =
-            hintsFulfilled(hints, row, multiplicationMode) && hintsUsed(hints, row, multiplicationMode) && aggregateValid(hints, row, multiplicationMode)
+        fun isPartialOk(): Boolean =
+            hintsFulfilled(hints, current, multiplicationMode) &&
+            hintsUsed(hints, current, multiplicationMode) &&
+            aggregateValid(hints, current, multiplicationMode)
 
-        fun backtrack(pos: Int, availableNumbers: List<Int>) {
+        fun backtrack(pos: Int) {
             if (pos == gridSize) {
-                if (isPartialOk(current)) results.add(current.copyOf())
+                if (isPartialOk()) results.add(current.copyOf())
                 return
             }
-            val candidates = listOf(CELL_EMPTY) + availableNumbers
-            for (num in if (allowed != null) candidates.filter { it in allowed[pos] } else candidates) {
-                current[pos] = num
-                if (isPartialOk(current)) {
-                    backtrack(pos + 1, if (num == CELL_EMPTY) availableNumbers else availableNumbers - num)
+            val posAllowed = allowed?.get(pos)
+
+            // Try CELL_EMPTY
+            if (posAllowed == null || CELL_EMPTY in posAllowed) {
+                current[pos] = CELL_EMPTY
+                if (isPartialOk()) backtrack(pos + 1)
+            }
+
+            // Try each number 1..n
+            for (num in 1..n) {
+                if (!usedNumbers[num] && (posAllowed == null || num in posAllowed)) {
+                    current[pos] = num
+                    if (isPartialOk()) {
+                        usedNumbers[num] = true
+                        backtrack(pos + 1)
+                        usedNumbers[num] = false
+                    }
                 }
             }
             current[pos] = CELL_UNSET
         }
 
-        backtrack(0, (1..n).toList())
+        backtrack(0)
         return results
     }
 
@@ -184,7 +199,9 @@ object PuzzleSolverRowBased {
         maxCount: Int = Int.MAX_VALUE,
         useAC3: Boolean = true,
         diagonalMode: Boolean = false,
-        multiplicationMode: Boolean = false
+        multiplicationMode: Boolean = false,
+        prefilledCells: Map<Int, Int> = emptyMap(),
+        collectSolutions: MutableList<Array<IntArray>>? = null
     ): Int {
         // possible[r][c] = values that can appear at cell (r,c) given configs generated so far.
         // Starts as the full domain {CELL_EMPTY, 1..n}; narrowed after each row/column is generated.
@@ -200,14 +217,20 @@ object PuzzleSolverRowBased {
 
         for ((isRow, idx) in items) {
             if (isRow) {
-                val allowed = Array(gridSize) { c -> possible[idx][c].toSet() }
+                val allowed = Array(gridSize) { c ->
+                    val prefill = prefilledCells[idx * gridSize + c]
+                    if (prefill != null) setOf(prefill) else possible[idx][c].toSet()
+                }
                 rowConfigs[idx] = getValidRows(n, gridSize, hints.rowHints[idx], allowed, multiplicationMode)
                 // Narrow possible[idx][c] to only values that actually appear in any config.
                 for (c in 0 until gridSize) {
                     possible[idx][c].retainAll(rowConfigs[idx].mapTo(mutableSetOf()) { it[c] })
                 }
             } else {
-                val allowed = Array(gridSize) { r -> possible[r][idx].toSet() }
+                val allowed = Array(gridSize) { r ->
+                    val prefill = prefilledCells[r * gridSize + idx]
+                    if (prefill != null) setOf(prefill) else possible[r][idx].toSet()
+                }
                 colConfigs[idx] = getValidRows(n, gridSize, hints.colHints[idx], allowed, multiplicationMode)
                 // Narrow possible[r][idx] to only values that actually appear in any config.
                 for (r in 0 until gridSize) {
@@ -219,7 +242,7 @@ object PuzzleSolverRowBased {
 
         fun arcReduce(left: Int, right: Int): Boolean {
             var changed = false
-            var remainingConfigLeft = rowConfigs[left].toMutableList()
+            val remainingConfigLeft = rowConfigs[left].toMutableList()
             for (configLeft in rowConfigs[left]) {
                 var matchesAny = false
                 for (configRight in rowConfigs[right]) {
@@ -287,8 +310,6 @@ object PuzzleSolverRowBased {
         }
         cellPrune()
 
-
-
         fun ac3Prune() {
             // start with all row-row pairs
             var agenda = ArrayDeque<Pair<Int, Int>>()
@@ -311,7 +332,6 @@ object PuzzleSolverRowBased {
                     }
                 }
             }
-
         }
         if (useAC3) {
             ac3Prune()
@@ -325,20 +345,44 @@ object PuzzleSolverRowBased {
         val diagUsed     = if (diagonalMode) BooleanArray(n + 1) else null
         val antiDiagUsed = if (diagonalMode) BooleanArray(n + 1) else null
 
+        // Incremental column state — updated one step per row instead of re-scanning from row 0.
+        // This eliminates the IntArray(row+1) allocation that was the main backtracking hotspot.
+        val colHintIdxArr     = IntArray(gridSize)                              // current hint index per column
+        val colAccArr         = IntArray(gridSize) { if (multiplicationMode) 1 else 0 } // running accumulator per column
+        val colGroupHasValues = BooleanArray(gridSize)                          // whether a group is open per column
+
+        // Saved state per row level (gridSize+1 slots: entering row 0..gridSize).
+        val savedColHintIdx     = Array(gridSize + 1) { IntArray(gridSize) }
+        val savedColAcc         = Array(gridSize + 1) { IntArray(gridSize) }
+        val savedColGroupHasVal = Array(gridSize + 1) { BooleanArray(gridSize) }
+
         var count = 0
 
         // Returns true  → keep searching (count < maxCount).
         // Returns false → stop searching (count reached maxCount).
         fun backtrack(row: Int): Boolean {
             if (row == gridSize) {
-                // All rows placed — verify full column hints.
+                // All rows placed — verify that each column's accumulated state fully matches hints.
                 for (c in 0 until gridSize) {
-                    val col = IntArray(gridSize) { grid[it][c] }
-                    if (!hintsUsed(hints.colHints[c], col, multiplicationMode)) return true
+                    val ch = hints.colHints[c]
+                    val finalIdx = if (colGroupHasValues[c]) {
+                        // Last group still open: check it matches the next expected hint.
+                        if (colHintIdxArr[c] >= ch.size || ch[colHintIdxArr[c]] != colAccArr[c]) return true
+                        colHintIdxArr[c] + 1
+                    } else {
+                        colHintIdxArr[c]
+                    }
+                    if (finalIdx != ch.size) return true
                 }
                 count++
+                collectSolutions?.add(Array(gridSize) { r -> grid[r].copyOf() })
                 return count < maxCount
             }
+
+            // Save column state before trying any config for this row.
+            colHintIdxArr.copyInto(savedColHintIdx[row])
+            colAccArr.copyInto(savedColAcc[row])
+            colGroupHasValues.copyInto(savedColGroupHasVal[row])
 
             outer@ for (config in rowConfigs[row]) {
                 // Reject configurations that reuse a value already present in some column.
@@ -355,30 +399,47 @@ object PuzzleSolverRowBased {
                     if (antiVal != CELL_EMPTY && antiDiagUsed!![antiVal]) continue@outer
                 }
 
-                // Place the row.
-                for (c in 0 until gridSize) {
-                    grid[row][c] = config[c]
-                    if (config[c] != CELL_EMPTY) colUsed[c][config[c]] = true
-                }
-                if (diagonalMode) {
-                    val mainVal = config[row]
-                    if (mainVal != CELL_EMPTY) diagUsed!![mainVal] = true
-                    val antiCol = gridSize - 1 - row
-                    val antiVal = config[antiCol]
-                    if (antiVal != CELL_EMPTY) antiDiagUsed!![antiVal] = true
-                }
-
-                // Prune: each partial column must still be hint-consistent.
+                // Incrementally update column state and check consistency.
+                // This replaces the old IntArray(row+1) allocation + isColPartialConsistent scan.
                 var colsOk = true
                 for (c in 0 until gridSize) {
-                    val partial = IntArray(row + 1) { grid[it][c] }
-                    if (!isColPartialConsistent(hints.colHints[c], partial, multiplicationMode)) {
-                        colsOk = false
-                        break
+                    val v  = config[c]
+                    val ch = hints.colHints[c]
+                    if (v == CELL_EMPTY) {
+                        if (colGroupHasValues[c]) {
+                            if (colHintIdxArr[c] >= ch.size || ch[colHintIdxArr[c]] != colAccArr[c]) {
+                                colsOk = false; break
+                            }
+                            colHintIdxArr[c]++
+                        }
+                        colAccArr[c] = if (multiplicationMode) 1 else 0
+                        colGroupHasValues[c] = false
+                    } else {
+                        colAccArr[c] = if (multiplicationMode) colAccArr[c] * v else colAccArr[c] + v
+                        colGroupHasValues[c] = true
+                        if (colHintIdxArr[c] >= ch.size || colAccArr[c] > ch[colHintIdxArr[c]]) {
+                            colsOk = false; break
+                        }
                     }
                 }
 
-                if (colsOk && !backtrack(row + 1)) {
+                if (colsOk) {
+                    // Place the row.
+                    for (c in 0 until gridSize) {
+                        grid[row][c] = config[c]
+                        if (config[c] != CELL_EMPTY) colUsed[c][config[c]] = true
+                    }
+                    if (diagonalMode) {
+                        val mainVal = config[row]
+                        if (mainVal != CELL_EMPTY) diagUsed!![mainVal] = true
+                        val antiCol = gridSize - 1 - row
+                        val antiVal = config[antiCol]
+                        if (antiVal != CELL_EMPTY) antiDiagUsed!![antiVal] = true
+                    }
+
+                    val continueSearch = backtrack(row + 1)
+
+                    // Unplace the row.
                     for (c in 0 until gridSize) {
                         if (config[c] != CELL_EMPTY) colUsed[c][config[c]] = false
                         grid[row][c] = CELL_EMPTY
@@ -390,21 +451,14 @@ object PuzzleSolverRowBased {
                         val antiVal = config[antiCol]
                         if (antiVal != CELL_EMPTY) antiDiagUsed!![antiVal] = false
                     }
-                    return false
+
+                    if (!continueSearch) return false
                 }
 
-                // Unplace the row.
-                for (c in 0 until gridSize) {
-                    if (config[c] != CELL_EMPTY) colUsed[c][config[c]] = false
-                    grid[row][c] = CELL_EMPTY
-                }
-                if (diagonalMode) {
-                    val mainVal = config[row]
-                    if (mainVal != CELL_EMPTY) diagUsed!![mainVal] = false
-                    val antiCol = gridSize - 1 - row
-                    val antiVal = config[antiCol]
-                    if (antiVal != CELL_EMPTY) antiDiagUsed!![antiVal] = false
-                }
+                // Restore column state for the next config attempt.
+                savedColHintIdx[row].copyInto(colHintIdxArr)
+                savedColAcc[row].copyInto(colAccArr)
+                savedColGroupHasVal[row].copyInto(colGroupHasValues)
             }
             return true
         }
